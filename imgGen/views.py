@@ -67,6 +67,6 @@ def receive_webhook(request):
     try:
         data = json.loads(request.body)
         print("Webhook received:", data)
-        return JsonResponse({"status": "received"})
+        return JsonResponse({"status": "received",'data':data})
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
