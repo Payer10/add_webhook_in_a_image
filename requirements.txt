@@ -18,3 +18,4 @@ djangorestframework
 python-dotenv
 google-genai==1.7.0
 gunicorn
+pillow
