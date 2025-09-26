@@ -8,7 +8,6 @@ from google import genai
 from google.genai import types
 from PIL import Image
 from io import BytesIO
-import requests
 
 # Gemini client using API key from .env
 client = genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -20,8 +19,8 @@ os.makedirs(IMAGE_DIR, exist_ok=True)
 @csrf_exempt
 def generate_image(request):
     """
-    Generate image using Gemini API and return image data in JSON response.
-    This endpoint does NOT save images or call any webhook.
+    Only generate image using Gemini API.
+    Returns raw image bytes (hex string) in JSON.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST method required"}, status=405)
@@ -38,14 +37,21 @@ def generate_image(request):
             contents=[prompt],
         )
 
-        # Prepare image data in memory (base64 or similar)
-        image_data_list = []
+        # Only send back raw image hex to webhook (no saving here)
+        image_bytes = None
         for part in response.candidates[0].content.parts:
             if part.inline_data is not None:
                 image_bytes = part.inline_data.data
-                image_data_list.append(image_bytes.hex())  # convert to hex string for JSON
+                break  # only 1 image
 
-        return JsonResponse({"images": image_data_list, "prompt": prompt})
+        if not image_bytes:
+            return JsonResponse({"error": "No image generated"}, status=500)
+
+        # Send image hex in response
+        return JsonResponse({
+            "image_data": image_bytes.hex(),
+            "prompt": prompt
+        })
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
@@ -54,28 +60,32 @@ def generate_image(request):
 @csrf_exempt
 def receive_webhook(request):
     """
-    Receive webhook POST with image data and save images to MEDIA folder.
+    Receive webhook POST with image data and save image to MEDIA folder.
     """
     if request.method != "POST":
         return JsonResponse({"error": "POST method required"}, status=405)
 
     try:
         data = json.loads(request.body)
-        image_hex_list = data.get("image_data", [])
+        image_hex = data.get("image_data")
         prompt = data.get("prompt", "unknown_prompt")
 
-        saved_paths = []
+        if not image_hex:
+            return JsonResponse({"error": "No image data received"}, status=400)
 
-        for hex_str in image_hex_list:
-            image_bytes = bytes.fromhex(hex_str)
-            image = Image.open(BytesIO(image_bytes))
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            filename = f"{timestamp}.png"
-            filepath = os.path.join(IMAGE_DIR, filename)
-            image.save(filepath)
-            saved_paths.append(filepath)
+        # Convert hex to image and save
+        image_bytes = bytes.fromhex(image_hex)
+        image = Image.open(BytesIO(image_bytes))
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        filename = f"{timestamp}.png"
+        filepath = os.path.join(IMAGE_DIR, filename)
+        image.save(filepath)
 
-        return JsonResponse({"status": "received", "saved_paths": saved_paths, "prompt": prompt})
+        return JsonResponse({
+            "status": "received",
+            "saved_path": filepath,
+            "prompt": prompt
+        })
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
